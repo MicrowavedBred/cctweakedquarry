@@ -168,7 +168,6 @@ function GoToPosition(state, target)
     print("I made it to the target position!")
 end
 
---- THERE IS AN ERROR HERE AFTER FIRST COLUMN IS FINISHED AND CW TURN IS INITIATED ---
 function Move(state, direction, destructive)
     local converted
     destructive = destructive or false
@@ -177,39 +176,42 @@ function Move(state, direction, destructive)
         ["East"] = 1,
         ["South"] = 2,
         ["West"] = 3,
-        ["Up"] = 4,
-        ["Down"] = 5,
-        ["Forward"] = state.direction
+        ["Up"] = 50, --- High number to stay above 3 after the cw check---
+        ["Down"] = -50, --- Low number to stay below 0 after the ccw check---
+        ["Forward"] = state.direction,
+        ["cw"] = state.direction + 1,
+        ["ccw"] = state.direction - 1,
     }
     if type(direction) == "string" then
         converted = convert_direction[direction]
-    elseif direction == "cw" then
-        converted = state.direction + 1
-        if converted > 3 then
-            converted = 0
-        end
-    elseif direction == "ccw" then
-        converted = state.direction - 1
-        if converted < 0 then
-            converted = 3
-        end
-        else
-            converted = direction
+    else
+        converted = direction
     end
-    if converted < 4 then
+    if converted < 0 then
+        converted = converted + 4
+    elseif converted > 3 then
+        converted = converted - 4
+    end
+    if -1 < converted and converted < 4 then
         ChangeDirection(state, converted)
         if destructive then
-            SmartDig("Forward")
+            if not SmartDig("Forward") then
+                return false
+            end
         end
         turtle.forward()
-    elseif converted == 4 then
+    elseif converted > 3 then
         if destructive then
-            SmartDig("Up")
+            if not SmartDig("Up") then
+                return false
+            end
         end
         turtle.up()
-    elseif converted == 5 then
+    elseif converted < 0 then
         if destructive then
-            SmartDig("Down")
+            if not SmartDig("Down") then
+                return false
+            end
         end
         turtle.down()
     end
@@ -217,15 +219,16 @@ function Move(state, direction, destructive)
 end
 
 function InventoryFull(state, home)
-    if home.direction > 0 then
-        local all_items = home.direction - 1
-    else
-        local all_items = 3
+    print("Inventory Full! Going home!")
+    local all_items
+    local just_coal
+    all_items = home.direction - 1
+    if all_items < 0 then
+        all_items = all_items + 4
     end
-    if home.direction > 1 then
-        local just_coal = home.direction - 2
-    else
-        local just_coal = (home.direction - 2) + 4
+    just_coal = home.direction - 2
+    if just_coal < 0 then
+        just_coal = just_coal + 4
     end
 
 
@@ -241,7 +244,7 @@ function InventoryFull(state, home)
         turtle.turnRight()
     end
     ChangeDirection(state, all_items)
-    for i = 1, 16 do
+    for i = 2, 16 do
         if turtle.getItemDetail(i) ~= "minecraft:coal" then
             turtle.drop(i)
         else
@@ -253,16 +256,18 @@ function InventoryFull(state, home)
     ChangeDirection(state, just_coal)
     turtle.select(1)
     turtle.suck(turtle.getItemSpace(1))
-    GoToPosition(state)
+    GoToPosition(state, Return_Position)
 
 end
 
 function DigLayer(state, home)
     print("Digging Layer...")
+
     local start_dir = state.direction
     if state.y <= -62 then
         print("At base level! Coming home!")
         GoToPosition(state, home)
+        InventoryFull(state, home)
         return false
     end
     if SmartDig("Down") then
@@ -270,14 +275,50 @@ function DigLayer(state, home)
     else GoToPosition(state, home)
         return false
     end
+    local layer_start_pos = {
+        x = state.x,
+        y = state.y,
+        z = state.z,
+        direction = state.direction
+    }
     for row = 1, 16 do
         for col = 1, 16 do
-            Move(state, "Forward", true)
+            if not Move(state, "Forward", true) then
+                InventoryFull(state, home)
+                return false
+            end
         end
         if row % 2 == 1 then
-            Move(state, "cw", true)
+            if not Move(state, "cw", true) then
+                InventoryFull(state, home)
+                return false
+            end
         else
-            Move(state, "ccw", true)
+            if not Move(state, "ccw", true) then
+                InventoryFull(state, home)
+                return false
+            end
+        end
+    end
+    GoToPosition(state, layer_start_pos)
+end
+
+function PlaceChests()
+    local placed = 0
+    local slot, info
+    for i = 1, 16 do
+        turtle.select(i)
+        slot, info = turtle.getItemDetail()
+        if info.name == "minecraft:enderchest" then
+            turtle.turnLeft()
+            turtle.place()
+            turtle.turnRight()
+        elseif info.name == "minecraft:chest" then
+            turtle.turnLeft()
+            turtle.turnLeft()
+            turtle.place()
+            turtle.turnRight()
+            turtle.turnRight()
         end
     end
 end
@@ -306,6 +347,7 @@ Return_Position = {
     fuel = turtle.getFuelLevel()
 }
 
+
 ---- Start of main loop ----
 print("Checking GPS...")
 while not state.x do
@@ -324,18 +366,18 @@ end
 
 if not state.direction then
     print("Checking Direction...")
-    CheckDirection(state)
+    if CheckDirection(state) then
+        home.x, home.y, home.z = state.x, state.y, state.z
+        home.direction = state.direction
+    end
 end
 
 while true do
-    print("Nothing to do yet...")
-    print("State.Direction: " ..state.direction)
-
     if not DigLayer(state, home) then
         break
     end
-    -- ToDo
-    -- Dig Layer
-    -- Return Home
-    -- Dump inventory
+    --- ToDo ---
+    --- Handle Ender Chest ---
+    --- Handle Coal Chest ---
+    --- Move To New Chunk ---
 end
